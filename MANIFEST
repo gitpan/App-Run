@@ -1,0 +1,10 @@
+LICENSE
+MANIFEST
+META.yml
+Makefile.PL
+README
+example/echo
+lib/App/Run.pm
+t/00_compile.t
+t/10_cli.t
+t/20_config.t
