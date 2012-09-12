@@ -8,3 +8,5 @@ lib/App/Run.pm
 t/00_compile.t
 t/10_cli.t
 t/20_config.t
+t/30_script.t
+t/40_version.t

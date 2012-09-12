@@ -25,6 +25,7 @@ requires:
   Getopt::Long: 0
   Log::Contextual: 0
   Log::Contextual::WarnLogger: 0
+  Log::Log4perl: 0
   Pod::Usage: 0
   Scalar::Util: 0
   Try::Tiny: 0
@@ -35,4 +36,4 @@ resources:
   bugtracker: https://github.com/nichtich/App-Run/issues
   homepage: https://github.com/nichtich/App-Run
   repository: https://github.com/nichtich/App-Run.git
-version: 0.01
+version: 0.02

@@ -1,6 +1,6 @@
 package App::Run;
 {
-  $App::Run::VERSION = '0.01';
+  $App::Run::VERSION = '0.02';
 }
 #ABSTRACT: Create simple (command line) applications
 
@@ -13,239 +13,280 @@ use Try::Tiny;
 use Clone qw(clone);
 use Scalar::Util qw(reftype blessed);
 use Log::Contextual::WarnLogger;
-use Log::Contextual qw(:log :Dlog with_logger), -default_logger 
-	=> Log::Contextual::WarnLogger->new({ env_prefix => 'APP_RUN' });
+use Log::Contextual qw(:log :Dlog with_logger set_logger), -default_logger =>
+    Log::Contextual::WarnLogger->new({ env_prefix => 'APP_RUN' });
+use Log::Log4perl qw();
 use File::Basename qw();
 use Config::Any;
 
+our $CALLPKG;
+
+sub import {
+    my $pkg = shift;
+    $CALLPKG = caller(0);
+
+    no strict 'refs';
+    if (@_ and $_[0] eq 'script') {
+      my $app;
+        my $run = sub {
+            my $opts = shift;
+            *{"${CALLPKG}::OPTS"} = \$opts;
+            @ARGV = @_;
+#         set_logger $app->logger;
+        };
+#      foreach my $name (qw(log_error)) {
+#         *{"${CALLPKG}::$name"} = \*{ $name };
+#      }
+      $app = App::Run->new($run);
+      $app->run_with_args(@ARGV);
+   }
+   # TODO: require_version 
+}
+
 
 sub new {
-	my $self = bless { }, shift;
+    my $self = bless { }, shift;
 
-	$self->app( shift );
-	$self->{options} = { @_ };
+    $self->app( shift );
+    $self->{options} = { @_ };
 
-	$self;
+    $self;
 }
 
 
 sub parse_options {
-	my $self = shift;
+    my $self = shift;
 
-	local @ARGV = @_;
+    local @ARGV = @_;
 
-	require Getopt::Long;
-	my $parser = Getopt::Long::Parser->new(
-		config => [ "no_ignore_case", "pass_through" ],
-	);
+    require Getopt::Long;
+    my $parser = Getopt::Long::Parser->new(
+        config => [ "no_ignore_case", "pass_through" ],
+    );
 
-	my $options = $self->{options};
+    my $options = $self->{options};
 
-	my ($help,$version);
-	$parser->getoptions(
-		"h|help"	 => \$help,
-		"v|version"  => \$version,
-		"c|config=s" => sub { $options->{config} = $_[1] },
-	);
+    my ($help,$version);
+    $parser->getoptions(
+        "h|?|help"   => \$help,
+        "v|version"  => \$version,
+        "q|quiet"    => sub { $options->{loglevel} = 'ERROR' },
+        "c|config=s" => sub { $options->{config} = $_[1] },
+    );
 
-	if ($help) {
-		require Pod::Usage;
-		Pod::Usage::pod2usage(0);
-	}
+    if ($help) {
+        require Pod::Usage;
+        Pod::Usage::pod2usage(0);
+    }
 
-	if ($version) {
-		say $self->name." ".($self->VERSION // '(unknown version)');
-		exit;
-	}
+    if ($version) {
+        say $self->name." ".($self->version // '(unknown version)');
+        exit;
+    }
 
-	my @args;
-	while (defined(my $arg = shift @ARGV)) {
-		if ($arg =~ /^([^=]+)=(.+)/) {
-			my @path = split /\./, $1;
-			my $hash = $options;
-			while( @path > 1 ) {
-				my $e = shift @path;
-				$hash->{$e} //= { };
-				$hash = $hash->{$e};
-			}
-			$hash->{ $path[0] } = $2 
-				if (reftype($hash)||'') eq 'HASH';
-		} else {
-			push @args, $arg;
-		}
-	}
+    my @args;
+    while (defined(my $arg = shift @ARGV)) {
+        if ($arg =~ /^([^=]+)=(.+)/) {
+            my @path = split /\./, $1;
+            my $hash = $options;
+            while( @path > 1 ) {
+                my $e = shift @path;
+                $hash->{$e} //= { };
+                $hash = $hash->{$e};
+            }
+            $hash->{ $path[0] } = $2
+                if (reftype($hash)||'') eq 'HASH';
+        } else {
+            push @args, $arg;
+        }
+    }
 
-	$options->{config} = '' 
-		unless exists $options->{config};
+    $options->{config} = ''
+        unless exists $options->{config};
 
-	return @args;
+    return @args;
 }
 
 
 sub load_config {
-	my ($self, $from) = @_;
+    my ($self, $from) = @_;
 
-	# TODO: log this by using a default logger
+    # TODO: log this by using a default logger
 
-	my ($config,$configfile);
-	try {
-		if ($from) {
-			# Config::Any interface sucks
-			$config = Config::Any->load_files( { 
-				files => [$from], use_ext => 1,
-				flatten_to_hash => 1,
-			} );
-		} else {
-			$config = Config::Any->load_stems( {
-				stems => [$self->name], 
-				use_ext => 1,
-				flatten_to_hash => 1,
-			} );
-		}
-		($configfile,$config) = %$config;
-	} catch {
-		$_ //= ''; # where's our error message?!
-		croak sprintf("failed to load config file %s: $_",
-			($from || $self->name.".*"));
-	};
+    my ($config,$configfile);
+    try {
+        if ($from) {
+            # Config::Any interface sucks
+            $config = Config::Any->load_files( {
+                files => [$from], use_ext => 1,
+                flatten_to_hash => 1,
+            } );
+        } else {
+            $config = Config::Any->load_stems( {
+                stems => [$self->name],
+                use_ext => 1,
+                flatten_to_hash => 1,
+            } );
+        }
+        ($configfile,$config) = %$config;
+    } catch {
+        $_ //= ''; # where's our error message?!
+        croak sprintf("failed to load config file %s: $_",
+            ($from || $self->name.".*"));
+    };
 
-	if ($config) {
-		while (my ($key,$value) = each %$config) {
-			$self->{options}->{$key} //= $value;
-		}
-	}
+    if ($config) {
+        while (my ($key,$value) = each %$config) {
+            $self->{options}->{$key} //= $value;
+        }
+    }
 }
 
 
 sub init {
-	my $self = shift;
+    my $self = shift;
 
-	# TODO: also set options with this method?
+    # TODO: also set options with this method?
 
-	$self->enable_logger;
+    $self->enable_logger;
 
-	my $app = $self->app;
-	if (blessed $app and $app->can('init')) {
-		with_logger $self->logger, sub { $app->init( $self->{options} ) };
-	}
+    my $app = $self->app;
+    if (blessed $app and $app->can('init')) {
+        with_logger $self->logger, sub { $app->init( $self->{options} ) };
+    }
 }
 
 
 sub run {
-	my $self = shift;
+    my $self = shift;
 
-	my $options = clone($self->{options});
-	my $config = delete $options->{config};
+    my $options = clone($self->{options});
+    my $config = delete $options->{config};
 
-	# called only the first time
-	if ( defined $config ) {
-		$self->load_config( $config );
-		$self->init;
-	}
+    # called only the first time
+    if ( defined $config ) {
+        $self->load_config( $config );
+        $self->init;
+    }
 
-	# override options
-	if (@_ and (reftype($_[0])//'') eq 'HASH') {
-		# TODO: use Data::Iterator to merge options (?)
-		my $curopt = shift;
-		while(my ($k,$v) = each %$curopt) {
-			$options->{$k} = $v;
-		}
-	}
+    # override options
+    if (@_ and (reftype($_[0])//'') eq 'HASH') {
+        # TODO: use Data::Iterator to merge options (?)
+        my $curopt = shift;
+        while(my ($k,$v) = each %$curopt) {
+            $options->{$k} = $v;
+        }
+    }
 
-	my @args = @_;
-	log_trace { "run with args: ",join(',',@args) };
+    my @args = @_;
+    log_trace { "run with args: ",join(',',@args) };
 
-	$self->enable_logger unless $self->logger;
+    $self->enable_logger unless $self->logger;
 
-	my $app = $self->app;
+    my $app = $self->app;
 
-	with_logger $self->logger, sub {
-#		Dlog_trace { "run $_" } $cmd, @args;
-		try { 
-			return( (reftype $app eq 'CODE') 
-				? $app->( $options, @args )
-				: $app->run( $options, @args ) );
-		} catch {
-			log_error { $_ };
-			return undef;
-		}
-	};
+    with_logger $self->logger, sub {
+#        Dlog_trace { "run $_" } $cmd, @args;
+        try {
+            return( (reftype $app eq 'CODE')
+                ? $app->( $options, @args )
+                : $app->run( $options, @args ) );
+        } catch {
+            log_error { $_ };
+            return undef;
+        }
+    };
 }
 
 
 sub run_with_args {
-	my $self = shift;
-	$self->run( $self->parse_options( @_ ) );
+    my $self = shift;
+    $self->run( $self->parse_options( @_ ) );
 }
 
 
 sub name {
-	my $self = shift;
-	my $app = $self->app;
+    my $self = shift;
+    my $app = $self->app;
 
-	$self->{name} //= $app->name
-		if blessed $app and $app->can('name');
+    $self->{name} //= $app->name
+        if blessed $app and $app->can('name');
 
-	($self->{name}) = File::Basename::fileparse($0)
-		unless defined $self->{name};
+    ($self->{name}) = File::Basename::fileparse($0)
+        unless defined $self->{name};
 
-	return $self->{name};
+    return $self->{name};
+}
+
+
+sub version {
+    my $self = shift;
+
+    my $pkg = blessed $self->app;
+    if (!$pkg) {
+        $pkg = $CALLPKG;
+    } elsif( $self->app->can('VERSION') ) {
+        return $self->app->VERSION;
+    }
+
+    no strict 'refs';
+    return ${"${pkg}::VERSION"};
 }
 
 
 sub app {
-	my $self = shift;
+    my $self = shift;
 
-	if (@_) {
-		my $app = shift;
-		croak 'app must be code reference or object with ->run'
-			unless (reftype($app) // '') eq 'CODE'
-				or (blessed $app and $app->can('run'));
-		$self->{app} = $app;
-	}
+    if (@_) {
+        my $app = shift;
+        croak 'app must be code reference or object with ->run'
+            unless (reftype($app) // '') eq 'CODE'
+                or (blessed $app and $app->can('run'));
+        $self->{app} = $app;
+    }
 
-	return $self->{app};
+    return $self->{app};
 }
 
 
 sub logger {
-	my $self = shift;
-	return $self->{log4perl} unless @_;
+    my $self = shift;
+    return $self->{log4perl} unless @_;
 
-	if (blessed($_[0]) and $_[0]->isa('Log::Log4perl::Logger')) {
-		return ($self->{log4perl} = $_[0]);
-	}
+    if (blessed($_[0]) and $_[0]->isa('Log::Log4perl::Logger')) {
+        return ($self->{log4perl} = $_[0]);
+    }
 
-	croak "logger configuration must be an array reference"
-		unless !$_[0] or (reftype($_[0]) || '') eq 'ARRAY';
+    croak "logger configuration must be an array reference"
+        unless !$_[0] or (reftype($_[0]) || '') eq 'ARRAY';
 
-	my @config = $_[0] ? @{$_[0]} : ({
-		class     => 'Log::Log4perl::Appender::Screen',
-		threshold => 'WARN'
-	});
+    my @config = $_[0] ? @{$_[0]} : ({
+        class     => 'Log::Log4perl::Appender::Screen',
+        threshold => 'WARN'
+    });
 
-	my $log = Log::Log4perl->get_logger( __PACKAGE__ );
-	foreach my $c (@config) {
-		my $app = Log::Log4perl::Appender->new( $c->{class}, %$c );
-		my $layout = Log::Log4perl::Layout::PatternLayout->new( 
-			$c->{layout} || "%d{yyyy-mm-ddTHH::mm} %p{1} %c: %m{chomp}%n" );
-		$app->layout( $layout);
-		$app->threshold( $c->{threshold} ) if exists $c->{threshold};
-		$log->add_appender($app);
-	}
+    my $log = Log::Log4perl->get_logger( __PACKAGE__ );
+    foreach my $c (@config) {
+        my $app = Log::Log4perl::Appender->new( $c->{class}, %$c );
+        my $layout = Log::Log4perl::Layout::PatternLayout->new(
+            $c->{layout} || "%d{yyyy-mm-ddTHH::mm} %p{1} %c: %m{chomp}%n" );
+        $app->layout( $layout);
+        $app->threshold( $c->{threshold} ) if exists $c->{threshold};
+        $log->add_appender($app);
+    }
 
-	$log->trace( "new logger initialized" );
+    $log->trace( "new logger initialized" );
 
-	return ($self->{log4perl} = $log);
+    return ($self->{log4perl} = $log);
 }
 
 
 sub enable_logger {
-	my $self = shift;
-	my $options = $self->{options};
+    my $self = shift;
+    my $options = $self->{options};
 
-	$self->logger( $options->{logger} );
-	$self->logger->level( $options->{loglevel} || 'WARN' );
+    $self->logger( $options->{logger} );
+    $self->logger->level( $options->{loglevel} || 'WARN' );
 }
 
 1;
@@ -260,22 +301,62 @@ App::Run - Create simple (command line) applications
 
 =head1 VERSION
 
-version 0.01
+version 0.02
 
 =head1 SYNOPSIS
 
 THIS IS AN EARLY DEVELOPER RELEASE NOT FULLY COVERED BY TESTS!
 
-	my $app = sub {
-		my ($options, @args) = @_;
-		... # do something
-	};
-	App::Run->new( $app )->run_with_args(@ARGV);
+    ### shortest form of a script
+    use App::Run 'script'; # parses @ARGV and sets $OPTS
+    
+	...; # your script
+
+    =head1 SYNOPSIS
+    
+	...your documentation...
+
+    =cut
+
+
+    ### put script into a sub
+    use App::Run;
+
+    sub main {
+        my ($opts, @args) = @_;
+        ...;
+    }
+
+    App::Run->new( \&main )->run_with_args(@ARGV);
+
+
+    ### put script into a package
+    use App::Run;
+
+	{ 
+	    package MyApp;
+        
+		our $VERSION = 1.0; # shown if called with -v
+
+	    sub init {          # called before first run
+			my ($opts) = @_;
+	        ...; 
+	    }
+
+	    sub run {           # main method
+            my ($opts, @args) = @_;
+			...;
+	    }
+	}
+
+	App::Run->new( MyApp->new )->run_with_args(@ARGV);
 
 =head1 DESCRIPTION
 
 App::Run provides a boilerplate to build applications that can (also) be
 run from command line. The module comes in a single package that facilitates:
+
+=over 4
 
 =item *
 
@@ -283,13 +364,15 @@ Setting configuration values (from file or from command line)
 
 =item *
 
-Initialization 
+Initialization
 
 =item *
 
 Logging
 
 =back
+
+App::Run combines L<Pod::Usage>, L<Config::Any>, and L<Log::Contextual>.
 
 =head1 METHODS
 
@@ -311,17 +394,18 @@ results in the following options
 which could also be specified in a YAML configuration file as
 
     foo: bar
-	doz:
-	  bar: 2
+    doz:
+      bar: 2
 
 The options are persistently stored in the application object. You should only
 call this method once and only for command line applications.
 
 The following arguments are always detected:
 
-    --h, --help               print help with POD::Usage and exit 
-	--v, --version            print version and exit
-	-c FILE, --config FILE    sets option config=file
+    --h, --help, -?           print help with POD::Usage and exit
+    --v, --version            print version and exit
+    -c FILE, --config FILE    sets option config=file
+    --quiet                   sets loglevel=ERROR
 
 The option C<config> is set to the empty string by default.
 
@@ -355,6 +439,13 @@ This will also initialize the application before actually running it.
 Returns the name of the application. The name is only determinded once, as
 return value from C<< $app->name >> (if implemented) or from C<$0>.
 
+=head2 version
+
+Returns the version of the application. The version is determined from the
+application's C<VERSION> method or from its C<$VERSION> variable, if it is an
+object, or from C<$VERSION> of the package that imported App:Run.  Use method
+C<VERSION> instead of C<version> to get the version of App:::Run.
+
 =head2 app ( $app )
 
 Get and/or set the wrapped application as object or code reference.
@@ -367,25 +458,25 @@ that each contain configuration of L<Log::Log4perl::Appender>.  The default
 appender, as configured with C<logger(undef)> is equal to setting:
 
     logger([{
-		class     => 'Log::Log4perl::Appender::Screen',
-		threshold => 'WARN'
-	}])
+        class     => 'Log::Log4perl::Appender::Screen',
+        threshold => 'WARN'
+    }])
 
 To simply log to a file, one can use:
 
-	logger([{
-		class     => 'Log::Log4perl::Appender::File',
-		filename  => '/var/log/picaedit/error.log',
-		threshold => 'ERROR',
-		syswrite  => 1,
-	})
+    logger([{
+        class     => 'Log::Log4perl::Appender::File',
+        filename  => '/var/log/picaedit/error.log',
+        threshold => 'ERROR',
+        syswrite  => 1,
+    })
 
 Without C<threshold>, logging messages up to C<TRACE> are catched. To actually enable
 logging, a default logging level is set, for instance
 
-	logger->level('WARN');
+    logger->level('WARN');
 
-Use C<logger([]) to disable all loggers.
+Use C<logger([])> to disable all loggers.
 
 You should not need to directory call this method but provide configuration
 values C<logger> and C<loglevel>, for instance in a YAML config file:
@@ -394,8 +485,8 @@ values C<logger> and C<loglevel>, for instance in a YAML config file:
     logger:
       - class:     Log::Log4perl::Appender::File
         filename:  error.log
-		threshold: ERROR
-      - class:     Log::Log4perl::Appender::Scren
+        threshold: ERROR
+      - class:     Log::Log4perl::Appender::Screen
         layout:    "%d{yyyy-mm-ddTHH::mm} %p{1} %C: %m{chomp}%n"
 
 =head2 enable_logger
@@ -415,7 +506,7 @@ your application. See L<Log::Log4perl> for logging configuration.
 
 See L<CLI::Framework> for a more elaborated application framework.
 
-App::Run requires at least Perl 5.10. 
+App::Run requires at least Perl 5.10.
 
 This package was somehow inspired by L<plackup>.
 

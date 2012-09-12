@@ -32,13 +32,14 @@ my %WriteMakefileArgs = (
     "Getopt::Long" => 0,
     "Log::Contextual" => 0,
     "Log::Contextual::WarnLogger" => 0,
+    "Log::Log4perl" => 0,
     "Pod::Usage" => 0,
     "Scalar::Util" => 0,
     "Try::Tiny" => 0,
     "strict" => 0,
     "warnings" => 0
   },
-  "VERSION" => "0.01",
+  "VERSION" => "0.02",
   "test" => {
     "TESTS" => "t/*.t"
   }
