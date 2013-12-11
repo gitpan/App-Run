@@ -1,6 +1,6 @@
 package App::Run;
 {
-  $App::Run::VERSION = '0.02';
+  $App::Run::VERSION = '0.03';
 }
 #ABSTRACT: Create simple (command line) applications
 
@@ -291,9 +291,11 @@ sub enable_logger {
 
 1;
 
-
 __END__
+
 =pod
+
+=encoding UTF-8
 
 =head1 NAME
 
@@ -301,11 +303,13 @@ App::Run - Create simple (command line) applications
 
 =head1 VERSION
 
-version 0.02
+version 0.03
 
 =head1 SYNOPSIS
 
-THIS IS AN EARLY DEVELOPER RELEASE NOT FULLY COVERED BY TESTS!
+THIS MODULE IS NOT MAINTAINED ANYMORE. Please just 
+L<http://neilb.org/2013/07/24/adopt-a-module.html|adopt it> 
+or have a look at L<App::Cmd> instead!
 
     ### shortest form of a script
     use App::Run 'script'; # parses @ARGV and sets $OPTS
@@ -495,8 +499,6 @@ Set logger and loging level from logging options C<logger> and C<loglevel>.
 Logging level is set to C<WARN> by default. You should not need to directly
 call this method unless you have changed the logging options.
 
-=encoding utf8
-
 =head1 SEE ALSO
 
 Configuration is read with L<Config::Any>.
@@ -516,10 +518,9 @@ Jakob Voß <voss@gbv.de>
 
 =head1 COPYRIGHT AND LICENSE
 
-This software is copyright (c) 2012 by Jakob Voß.
+This software is copyright (c) 2013 by Jakob Voß.
 
 This is free software; you can redistribute it and/or modify it under
 the same terms as the Perl 5 programming language system itself.
 
 =cut
-
